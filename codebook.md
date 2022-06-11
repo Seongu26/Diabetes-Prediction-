@@ -12,7 +12,7 @@ Dataset : https://www.kaggle.com/datasets/saurabh00007/diabetescsv?select=diabet
 - BMI : Body mass index
 - DiabetesPedigreeFunction : Diabetes pedigree function
 - Age : age
-- Outcome : diagnosis of diabetes(1 mean diabetes 0 mean no diabetes)
+- Outcome : diagnosis of diabetes(1 means havgin diabetes and 0 means no diabetes)
 
 ## Summary
 
