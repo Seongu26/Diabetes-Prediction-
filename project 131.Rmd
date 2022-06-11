@@ -1,0 +1,786 @@
+---
+title: "FinalProject131"
+author: "Seongu Lee"
+date: "5/31/2022"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#install.packages("vembedr")
+library(xgboost)
+library(dplyr)
+library(tidymodels)
+library(ISLR)
+library(tidyverse)
+library(ggplot2)
+library(corrplot)
+library(glmnet)
+library(janitor)
+library(rpart.plot)
+library(ranger)
+library(vip)
+library(reshape2)
+library("vembedr")
+```
+
+# Introduction
+<br />
+
+
+
+This project is about finding a best model to predict the diagnosis of diabetes with given data set. 
+
+
+# Diabetes In Real Life
+<br />
+
+
+
+```{r}
+embed_youtube("wZAjVQWbMlE")
+```
+
+
+Diabetes is a disease that occurs when our blood glucose is very high (126mg/dL). There are two types of diabetes. If we have type 1 diabetes, bodies don't make insulin that helps glucose from food get into your cells to be used for energy. If we have type 2 diabetes, bodies don`t make or use insulin well. Okay. Now we know what Diabetes is. But, is it  always true that one person will have diabetes if his/her test score is more than 126. The answer is NO. There will be more factors help people for diabetes diagnosis. From this project, I will find the variables that affect to diabetes. And I will predict diabetes diagnosis based on those variables with a model I picked at the end.
+
+
+
+# Data loading
+<br />
+
+
+I will be using a data set that described 8 variables and outcome of diagnosis, so total 9 variables. There are 768 rows. The detail will be shown in codebook. 
+
+
+```{r}
+data <- read.csv("C:/Users/sungu/Desktop/diabetes.csv") # read data
+summary(data) # summary of raw data
+```
+
+
+Now I will clean the data to look better and more useful
+
+
+# Data Cleaning
+<br />
+
+
+```{r}
+clean<- clean_names(data) # make the name simple
+clean$outcome <- factor(clean$outcome) # made outcome factor value to show better plots of outcome 0 and 1
+cleanDia<- subset(clean, clean$outcome == 1) # Cleaned data with diabetes outcome
+cleanNon<- subset(clean, clean$outcome == 0) # Cleaned data with non-diabetes outcome
+a<-is.na(clean) # find the null data
+sum(a) # sum of the null datas
+```
+
+
+There is no zero data in this data set. SO it is good to use. I also made the outcome variable factors, because factored outcome was able to plot with outcome of 0 and 1 instead of 0.5 and 1.5.
+
+
+# Data split
+<br />
+
+
+Since this data set is not large, I picked 0.8 for split percentage.
+The dimension looks good(same values). 614 rows for training. 154 for testing.
+
+
+```{r}
+split <- initial_split(clean, strata = outcome, prop = 0.8)
+train <- training(split)
+test <- testing(split)
+dim(train)
+dim(test)
+ 
+```
+
+
+# EDA
+<br />
+
+
+I made my data set split. Now I need to figure the relations among variables.
+
+
+First, let's see the corrplot for correlation.
+
+
+```{r}
+train %>%
+  select(where(is.numeric)) %>% 
+  cor() %>% 
+  corrplot(type = 'full', diag = FALSE, 
+           method = 'number')
+```
+
+
+Pregnancy and age are correlated. Outcome and glucose, bmi look correlated as well.
+Outcome and blood pressure, skin thickness don't look correlated. 
+
+
+Now I will show the outcome vs variables with scatterplot.
+
+
+### bmi
+<br />
+
+
+```{r}
+
+plot(train$outcome, train$bmi, main="Scatterplot outcome vs bmi",
+   xlab="Outcome(diabetes) ", ylab="bmi", col = 'blue')
+bmi <- melt(train,id.vars='outcome', measure.vars=c('bmi'))
+bmiPlot <- ggplot(bmi) +
+      geom_jitter(aes(x=outcome, y=value,  color=variable))
+bmiPlot
+```
+
+
+Those plots show that there is significant effect with bmi. The higher value of variable shows more outcome of diabetes from jitter plot. Also, the blue box plot shows more outcome of diabetes on high bmi. So, It should be very useful to model. I should say the higher bmi will cause more of diabetes compare to same other variables. So, if one person has higher bmi, it will be more dangerous than other to have diabetes. This is a important plots outcome.
+
+
+### glucose
+<br />
+
+
+```{r}
+plot(train$outcome, train$glucose, main="outcome vs glucose",
+   xlab="Outcome(diabetes) ", ylab="glucose", col = 'red')
+glu <- melt(train,id.vars='outcome', measure.vars=c('glucose'))
+gluPlot <- ggplot(glu) +
+      geom_jitter(aes(x=outcome, y=value,  color=variable))
+gluPlot
+```
+
+
+The glucose is a Blood sugar. This would show how much sugar contained in the blood. I could guess it would be more dangerous to have more blood sugar of course. And, based on plots, my guess was correct. High Glucose value seems like having more outcome of diabetes in jitter plot. Also, box plot shows the same outcome. Again I could say the glucose variable will be useful for modeling. 
+
+
+### blood pressure
+<br />
+
+
+```{r}
+plot(train$outcome, train$blood_pressure, main="Scatterplot outcome vs blood pressure",
+   xlab="Outcome(diabetes) ", ylab="blood_pressure", col = 'green')
+bloPree <- melt(train,id.vars='outcome', measure.vars=c('blood_pressure'))
+bloPrePlot <- ggplot(bloPree) +
+      geom_jitter(aes(x=outcome, y=value,  color=variable))
+bloPrePlot
+```
+
+
+Those plots were showing the blood pressure versus diabetes. Before I saw those plots, I was think it would have more chance to have diabetes if person had higher blood pressure. And as showsn in those plots, having high blood pressure looks like having higher chance to get diabetes. The jitter plot showed a litter higher value had more outcome of diabetes. And the box plot showed the same. So, having high blood pressure will be higher chance to get diabetes. This result was also guessable. In general, high blood pressure is a serial issue of health. So, I should be affecting the diabetes, too.
+
+
+### insulin
+<br />
+
+
+```{r}
+plot(train$outcome, train$insulin, main=" outcome vs insulin",
+   xlab="Outcome(diabetes) ", ylab="insulin", col = 'black') 
+ins <- melt(train,id.vars='outcome', measure.vars=c('insulin'))
+inspl <- ggplot(ins) +
+      geom_jitter(aes(x=outcome, y=value,  color=variable))
+inspl
+```
+
+
+Now, those are the insulin plots. Insuline is a hormone that allows glucose to enter our body's cells to provide energy. So, it will be incread after we eat something. However, as I mentioned in codebook, this data showed the insulin value after two hours. So, I could guess, it will be more dangerous to have lower insulin value. And from the plots, having high insulin looks like having higher chance to get diabetes. The jitter plot showed more concentrated on higher values from the outcome of diabetes. And the outcome of non- diabetes showed more less values of insulin.
+
+
+### pregnancies
+<br />
+
+
+```{r}
+plot(train$outcome, train$pregnancies, main=" outcome vs pregnancies",
+   xlab="Outcome(diabetes) ", ylab="pregnancies", col = 'red') 
+smaller <- melt(train,id.vars='outcome', measure.vars=c('pregnancies'))
+q <- ggplot(smaller) +
+      geom_jitter(aes(x=outcome, y=value,  color=variable))
+q
+```
+
+
+Those plots were about pregnancies and diabetes relation. From the jitter plot, the Pregnancies are scattered instead of concentrated. So, the pregnancies were not quite affecting the result. However, It affected in box plot. Box plot showed more higher values of pregnancies in outcome plot. So, higher pregnancies can lead to a result that person can have more chance to have diabetes. 
+
+
+### DPF
+<br />
+
+
+```{r}
+plot(train$outcome, train$diabetes_pedigree_function, main=" outcome vs diabetes_pedigree_function",
+   xlab="Outcome(diabetes) ", ylab="diabetes_pedigree_function", col = 'blue') 
+func <- melt(train,id.vars='outcome', measure.vars=c('diabetes_pedigree_function'))
+t <- ggplot(func) +
+      geom_jitter(aes(x=outcome, y=value,  color=variable))
+t
+```
+
+
+Diabetes pedigree function (DPF) is a function which scores likelihood of diabetes based on family history. So, higher value of DPF would represent that some people of family had diabetes.  I can see that having high or low diabetes pedigree function doesn't affect the result of diabetes test in jitter plot (It looked scttered). But, box plot shows having higher DPF is having higher chance to get diabetes. So, I could say this data will be useful to build a model since higher values of DPF leaded to get higher chance of diabetes. 
+
+
+### Age
+<br />
+
+
+```{r}
+plot(train$outcome, train$age, main=" outcome vs age",
+   xlab="Outcome(diabetes) ", ylab="age", col = 'green') 
+funct <- melt(train,id.vars='outcome', measure.vars=c('age'))
+ta <- ggplot(funct) +
+      geom_jitter(aes(x=outcome, y=value,  color=variable))
+ta
+```
+
+
+Those plots were about age. Of course, I could guess that old age would have higher chance to have diabetes. However, based on the jitter plot, age doesn't affect to have diabetes (scattered outcome). But it was different in box plot. I was having higher result of diabetes instead of non- diabetes. So, age could be a variable for deciding model and prediction
+
+
+### Skin thickness
+<br />
+
+
+```{r}
+plot(train$outcome, train$insulin, main=" outcome vs skin_thickness",
+   xlab="Outcome(diabetes) ", ylab="skin_thickness", col = 'red') 
+funct <- melt(train,id.vars='outcome', measure.vars=c('skin_thickness'))
+ta <- ggplot(funct) +
+      geom_jitter(aes(x=outcome, y=value,  color=variable))
+ta
+```
+
+
+Each person would have different thickness of skin. So, I could think more thickness might be able to store more sugar in blood which could lead diabetes. And that means high value of thickness Skin thickness had higher chance to have diabetes. As I mentioned, after I looked at those plots, having thick skin will increase a chance to have diabetes based on the plots. 
+
+
+Now, I just finished data visualization and I analyzed the plots to find the relationship between variables and outcome variable. And I was able to lead most of variables showed the siginificant effect to the outcome of diabetes.  
+
+
+### More analysis before model building 
+<br />
+
+```{r}
+summary(cleanDia)
+summary(cleanNon)
+```
+
+
+This was a brief summary table based on diabetes outcome and non-diabetes outcome. For the pregnancies through DPF variables, the all values from diabetes summary was higher than non- diabetes summary. But the only age variables showed the less differences of values from summary. I could say this is because the age was not really affecting the diabetes. After I was thinking the reason, I could say the reason is that the diabetes is not about how old we are. Young people can be tested for diabetes and old people is not just the only one can be tested for diabetes. So, this analysis is just for more imformation that support the data visualization. 
+
+
+
+# Model Building
+<br />
+
+
+
+Now is time for model building. I have spent many days to find the better way to build models and fit models. And I decided to use the materials from lectures. The steps are model building is following.
+
+
+1. `Fold`
+2. `Recipe`
+3. `Model generating`
+ + `Decision_tree` (Best performed tree)
+ + `Random Forest`
+ + `Boosted tree`
+ + `Multinomial logistic regression`
+
+
+
+### Fold
+<br />
+
+First I want to make folds to 
+
+
+```{r}
+folds <- vfold_cv(data = train, v = 3,repeats = 3)
+```
+
+
+I used 3 folds and repeated 3 times with `vfold_cv`. Since I has 614 rows of training data set, it is good to use 3 folds.
+
+
+### Recipe 
+<br />
+
+And I created a recipe 
+
+
+```{r}
+recipe <- recipe(outcome ~ glucose+ blood_pressure+ skin_thickness+ insulin +bmi +diabetes_pedigree_function  +age + pregnancies , data = train) %>% 
+   
+  step_dummy(all_nominal_predictors()) %>% 
+# step_zv(all_predictors()) %>% 
+  step_normalize(all_predictors())
+```
+
+
+I used `step_dummy` to make dummy predictors and I normalized with `step_normalize`. I didn't use the `step_ novel` because I didn't have a previously unseen factor. Also, I didn't use the `step_zv` because I didn't include variables that contain only a single value. I wanted to use both to have better result, but it didn't change anything of outcome. 
+
+
+Now I made a `recipe`, I just need to apply this folds and recipe to generate models.
+
+
+
+# Model searching
+<br />
+
+
+
+This part is about generating 4 models and comparing. I decided to best-performing pruned tree, Random forest (RD) , boosted tree, and Multinomial logistic regression. All of the four models were using classification. 
+
+
+### Decision_tree
+<br />
+
+This model is best-performing pruned tree. I used `rpart` engine and `classification` mode. `Rpart` engine is used for best-performing tree. And I will set up workflow with recipe and decision tree model. Tuning grid is created with cost_complexity and tree_depth which are hyperparameters. 
+
+
+```{r}
+tree <- decision_tree(cost_complexity = tune(),tree_depth = tune()) %>% 
+  set_engine("rpart") %>% 
+  set_mode("classification")
+
+```
+
+
+Now I created workflow and levels was 10 and range was -3 to -1 as I studied from lab. It chooses sensible values to try for each hyperparameter; here, I used 10 for each. 
+
+
+```{r}
+tree_wk <- workflow() %>% 
+  add_recipe(recipe) %>% 
+  add_model(tree)
+girds <- grid_regular(cost_complexity(range = c(-3, -1)), tree_depth(), levels = 10)
+```
+
+
+I executed the model with folds I created. And autoplot to see the tune performance. `grid_regular` chooses sensible values to try for each hyperparameter. Since I have two to tune, `grid_regular()` returns 10 \(\times\) 10 = 100 different possible tuning combinations. Also, the workflow was tree workflow that I defined. The folds was the fold set I defined. The grids was created by `grid_regular`.
+
+
+```{r}
+tune_res <- tune_grid(tree_wk,
+                      resamples = folds,
+                      grid = girds,
+                      metrics = metric_set(roc_auc))
+autoplot(tune_res) 
+```
+
+
+Now I can use `collect_metrics` to show the result of tune grid. And I can verify the mean which is the auccuracy.
+
+
+```{r}
+best<- collect_metrics(tune_res) %>% 
+        arrange(mean)
+best_auc<- max(best$mean)
+best_auc
+
+best_std_err<- max(best$std_err)
+best_std_err
+```
+
+
+I collected the metrics of mean and error. The best auc is `r best_auc` and the err is `r best_std_err` I could say the accuracy is pretty high. And the model of best performing tree is working properly. Also, I used only one hyperparameter at the first time. But, using two was more accurate. 
+
+
+### Random Forest
+<br />
+
+
+
+Now I will use the random forest to generate a model. The random forest model is made of multiple numbers of decision trees. So, this could be similar to the best performed tree, but RF will have more numbers of sets of trees. <br>
+
+
+To create and generate a random forest model, I used `ranger` for engine and `classification` mode.  Also, the `impurity` will provide variable importance scores for this model, which gives some insight into which predictors drive model performance. I used rf as the representation of the random forest model.
+
+
+```{r}
+rf <- rand_forest() %>%
+  set_engine("ranger",importance = "impurity") %>%
+  set_mode("classification")
+```
+
+
+I stored this model and my recipe in a workflow and I called it `rf_workflow`. I also used set_args for modeling since s`et_args()` can be used to modify the arguments of a model specification (`mtry`,`trees`,`min_n`).
+
+
+```{r}
+rf_workflow <- workflow() %>% 
+  add_model(rf %>% set_args(mtry = tune(), trees = tune(), min_n = tune())) %>% 
+  add_recipe(recipe)
+```
+
+
+I set up a tuning grid with 8 of `mtry` which is the number of variables and minimum number that is 1. Also, I set 1 to 200 of `trees`. I planned to use at least 1000 of trees, but I was taking too long (at least 4 hours). So I decided to use only 1 to 200 of `trees`. I know I will be not accurate as 1000 trees, but I needed to save time. And minimum of square root of the number of variables of `min_n` values. For the levels, I set 2. So, total I used 8 \(\times\) 8 \(\times\) 8 = 512 of different possible tunes since I have three hyperparameters.
+
+
+```{r}
+rf_grid <- grid_regular(mtry(range = c(1,8)), trees(range = c(1,200)), min_n(range = c(2, 20)), levels = 8)
+```
+
+
+I executed my model by tuning and I saved it as `rf_tune`. `tune_grid` is used for making performance metrics which included `accuracy` or `RMSE`. And I used this for accuracy again. `Resample` was used with folds set that I made in the beginning. And grid was the `rf_grid` that I created with `mtry`, `trees`, and `min_n`. Also, the workflow was random forest workflow that I defined in the beginning.
+
+
+```{r}
+rf_tune <- tune_grid( 
+  rf_workflow, 
+  resamples = folds, 
+  grid = rf_grid, 
+  metrics = metric_set(roc_auc) 
+  )
+  
+```
+
+
+I will use autoplot the random forest model to generate plots that corresponded to the tuned random forest model. 
+
+
+```{r}
+autoplot(rf_tune)
+```
+
+
+There were 8 plots from the autoplot function. The `roc_auc`'s were around 0.8 to 0.85. When tree was 1, the accuracy was very low. The reason was only one tree of sample would not be accurate. As the random forest model is a method of using independent decision trees and combine them in parallel, it will the least accuracy. More trees should lead the better result.
+
+
+
+```{r}
+random <- collect_metrics(rf_tune) %>% 
+          arrange(mean) 
+tail(random)
+random_auc<- max(tail(random$mean))
+random_auc
+
+random_std_err<- max(tail(random$std_err))
+random_std_err
+```
+
+
+The exact auc of random forest was `r random_auc`. And the SD was `r random_std_err`.
+
+
+### Boosted tree
+
+<br />
+
+
+
+For the third model, I will use boosted tree this time. The boosted tree is also using combination of many trees which means it will have less error than desicion tree method. But, unlike the random forest model, boosted tree is using boosting that combines weak learners (usually decision trees with only one split, called decision stumps) sequentially, so that each new tree corrects the errors of the previous one. So, this means that each tree trees are making the learning correct. And more trees will lead better result.
+
+
+I used `xgboost` engine which was used for boosted tree modeling and `classification` mode as well for this model. And I stored the model and recipe in workflow as `boost_wk` with recipe and boost model.
+
+
+```{r}
+boost = boost_tree(trees = tune()) %>%
+  set_engine("xgboost") %>% 
+  set_mode("classification") 
+
+boost_wk = workflow() %>% 
+  add_recipe(recipe) %>% 
+  add_model(boost)
+```
+
+This is a set up for grid with `grid_regular`. And I also use level 8, since I have 8 variables. Levels of 8 will be good to use. But I didn't set the `min_n` range this time because minimum number of data points was not needed for this model. Also, the `mtry` was not defined because not of variables was randomly sampled. Also, since I have one hyperparameter and 8 levels. I will have 8 different tunes. The `trees` are 1 to 2000 as shown in lab (I used this number because 1000 was too small to verify the plot variation).
+
+```{r}
+boost_grid <- grid_regular(trees(range = c(1,2000)), levels = 8)
+```
+
+I executed this model with boosted workflow, same folds and metrics, and boosted grid. Also, I autoplot the tune to generate the best plot. 
+
+```{r}
+boost_tune <- tune_grid( 
+  boost_wk, 
+  resamples = folds, 
+  grid = boost_grid, 
+  metrics = metric_set(roc_auc) 
+  )
+
+autoplot(boost_tune) 
+```
+
+
+The plot increased by 350 of trees. And it dropped after that point. I expected to have better result with higher numbers of trees, but It was wrong. This result was interesting. So, this means that more than 350 of trees lead less accuracy of model because the error from previous trees couldn't be fixed more.
+
+
+```{r}
+boostM<- collect_metrics(boost_tune) %>% 
+          arrange(mean)
+boost_auc<- max(boostM$mean)
+boost_auc  
+
+boost_std_err<- max(boostM$std_err)
+boost_std_err 
+```
+
+
+I collected the metrics for the boosted tree tune. The mean is `r boost_auc  ` and error was `r boost_std_err`
+
+
+### Multinomial logistic regression
+<br />
+
+
+Finally, I set up a Multinomial logistic regression. I used `classification` and `glmnet` for set model and engine. I set up a workflow. Also I got the tuning grid with `penalty` of range -5,5 and `mixture` of range 0 to 1 with levels 10. I also executed the model. There are two hyperparameters. The `penalty` represents the total amount of regularization in the model. And the `mixture` is numbers between zero and one. Since the engine is `glmnet`, I can't use the range of positive numbers only. Also, I had levels of 10. So, the total number of tune was 200.
+
+
+```{r}
+multLog <- multinom_reg(penalty = tune(),  mixture = tune()) %>% 
+  set_mode("classification") %>% 
+  set_engine("glmnet")
+en_workflow <- workflow() %>% 
+  add_recipe(recipe) %>% 
+  add_model(multLog)
+en_grid <- grid_regular(penalty(range = c(-5, 5)), 
+                        mixture(range = c(0, 1)), levels = 10)
+tune_res <- tune_grid(
+  en_workflow,
+  resamples = folds, 
+  grid = en_grid
+)
+```
+
+
+Also, I used tune_grid for the tune of the regression with workflow and folds.
+
+
+```{r}
+autoplot(tune_res)
+```
+
+
+I autoploted the tune model.The `roc_auc` was about 0.8 but it decreased after 1e+02 of regularization.
+
+
+```{r}
+mlr<- collect_metrics(tune_res) %>% 
+          arrange(mean)
+
+mlr_auc<- max(mlr$mean)
+mlr_auc  
+```
+
+
+I got the `r mlr_auc` accuracy with this model. This is also great result of modeling. I expected less than this value but It was better than my expectation. 
+
+
+
+# Model selecting
+<br />
+
+
+
+The performance of 4 models are completed. Now I need to decide which model has better accuracy. And I will use the selected model to the prediction of diabetes. This is the last step before I fit a model. To find the best model, I will be comparing the accuracy that I found from tune models. Let's see the below table to verify which model is good. I used `matrix` function to create a table of accuracy and model names.
+
+
+
+```{r}
+table <- matrix(c(best_auc, random_auc, boost_auc,mlr_auc  ),ncol =4)
+rownames(table) <- c('roc auc')
+colnames(table) <- c('best-performing pruned tree', 'randomforest','boosted tree models',' Multinomial logistic regression')
+table
+```
+
+
+So Multinomial logistic regression is the best performed model. The accuracy is `r mlr_auc` based on the `multinom_reg` model. 
+<br />
+
+Now I need to fit the model and apply to test data set. I will be using the `select_best` function to select the best outcome of the model. And I will be apply the model to workflow and fit with training set.
+<br />
+
+```{r}
+second_best_model <- select_best(tune_res, metric = 'roc_auc')
+final1<- finalize_workflow(en_workflow, second_best_model)
+final_fit1<- fit(final1, train)
+```
+
+
+This is fit model and I called it `final_ fit1`
+
+
+```{r}
+predicted_data <- augment(final_fit1, new_data = test) %>% 
+  select(outcome, starts_with(".pred"))
+head(predicted_data)
+```
+
+
+I used `augment` function for reshaping test data into a new fitted model. I selected the outcome as the outcome value and There were pred_0 and pred_1 from the function. The pred_0 mean the probability that the outcome will be 0 based on the fitted model with test data. And the pred_1 mean the probability that the outcome will be 1 based on the fitted model. From lecture, the pokemon types were using for this part, but here the two outcome values were displayed. 
+<br />
+
+Now I will show how the pred_0 and pred_1 data are displayed as the prediction method. And I will compare to the test data and new predicted result I generated. 
+
+
+```{r}
+predic<- predict(final_fit1, new_data = test, type = "class") %>% 
+          bind_cols(test %>% select(outcome)) %>% 
+          accuracy(truth = outcome, estimate = .pred_class)
+predic
+
+```
+
+This was the accuracy of comparing the predicted data and real test data. And the accuracy was `r predic$.estimate`. I could say it's good even if I had small data set. This model was performed well.
+
+
+
+Wait. I want to use the random forest model to verify the accuracy because it had only a bit of difference in `roc_auc`.
+
+
+
+```{r}
+best_model <- select_best(rf_tune, metric = 'roc_auc')
+final2<- finalize_workflow(rf_workflow, best_model)
+final_fit2<- fit(final2, train)
+```
+
+
+
+I used select_best function to get the best accuracy from the random forest tune. And I applied the test data set to the random forest model and predict the possible percentage of outcome of 0 and 1. I fit the random forest model with training data set. And I also used the random forest workflow and the best model of random forest. And I called the fitted model as `final_fit2`
+
+
+
+```{r}
+predicted_data2 <- augment(final_fit2, new_data = test) %>% 
+  select(outcome, starts_with(".pred"))
+head(predicted_data2)
+```
+
+
+The predicted_data is showing the predicted outcome. I used augment function to make a new predicted probability of outcome of 0 and 1(diabetes). And the brief of the data matrix was shown as well.
+
+
+```{r}
+pred2 <-predict(final_fit2, new_data = test, type = "class") %>% 
+            bind_cols(test %>% select(outcome)) %>% 
+            accuracy(truth = outcome, estimate = .pred_class)
+pred2
+```
+
+
+I used the predict function to compare the outcome result of test data set and new created data set. I wanted to show the accuracy and I used the `accuracy` function.
+`r pred2$.estimate` accuracy with the test data set. I would say the model selecting was also good. 
+
+
+
+It is Interesting. Both models estimates are similar. I could say it will be good to use both of result. But random forest is still little higher than Multinomial logistic regression
+
+
+
+
+### More than test data set
+<br>
+
+
+Now I want to verify if I can use this model to any data that I create instead of test data set.  I will make two data frames of same values of the variables. But, I want to know if the glucose is leading different outcome. So I will make the glucose value different. 
+
+
+First data frame (first participant) is following
+
+
+```{r}
+qualifications_1 <- data.frame(
+  glucose = 100,
+  blood_pressure = 68.18,
+  skin_thickness = 19.66,
+  insulin =68.79,
+  bmi  = 30.30,
+  diabetes_pedigree_function   = 0.4297,
+  age  = 24,
+  pregnancies  = 0
+)%>% 
+  mutate(
+    glucose = as.integer(glucose),
+    blood_pressure = as.integer(blood_pressure),
+    skin_thickness = as.integer(skin_thickness),
+    insulin = as.integer(insulin),
+    age = as.integer(age)
+    )
+```
+
+
+Second data frame (Second participant) is following
+
+
+```{r}
+qualifications_2 <- data.frame(
+  glucose = 198,
+  blood_pressure = 68.18,
+  skin_thickness = 19.66,
+  insulin =68.79,
+  bmi  =30.30,
+  diabetes_pedigree_function   = 0.4297,
+  age  = 24,
+  pregnancies  = 0
+)%>% 
+  mutate(
+    glucose = as.integer(glucose),
+    blood_pressure = as.integer(blood_pressure),
+    skin_thickness = as.integer(skin_thickness),
+    insulin = as.integer(insulin),
+    age = as.integer(age)
+    )
+```
+
+
+
+I supposed that there were two people of participants with age of 35 (not too young or old). And both male so they were not pregnant of course. And I used the mean values of non - diabetes data set which I was created as `cleanNon`; blood_pressure is 68.18; skin_thickness is 19.66; insulin  is 68.79; bmi is 30.30 ; and diabetes_pedigree_function is 0.4297. Also, for the glucose, CDC classified as the value of glucose is 200 to diagnose diabetes(As I mentioned in codebook, Glucose represented Plasma glucose concentration a 2 hours in an oral glucose tolerance test). First participant has normal value of glucose which is 100. And second participant has 198 of glucose. So, I can verify if the CDC's classification can be applied to my model. And I will predict the outcome and compare the two results. I will use random forest model first.
+
+
+
+``` {r}
+predict(final_fit1, qualifications_1)
+
+predict(final_fit1, qualifications_2)
+
+```
+
+
+
+The second person was tested as diabetes while first person was not from random forest model
+
+
+NOw I will use multiple logistic regression.
+
+
+Same set-ups but different model.
+
+
+```{r}
+
+predict(final_fit2, qualifications_1)
+
+predict(final_fit2, qualifications_2)
+
+
+```
+
+
+The result showed the same outcome from the random forest model. So, I can say like this based on the outcome result, `even if the person's glucose value is 198 which is less than 200, one person can be diagnosed diabetes.`
+
+
+
+# Conclusion
+<br>
+
+I was able to fit 4 models and I picked the Multinomial logistic regression model(MLR) as the best performed model. And I pick the random forest(RF) as the second best performed model. The MLR model had `r pred2 $.estimate` of accuracy. The RF model had `r predic$.estimate` of accuracy. The RF performed better than RF in accuracy comparing, but the actual accuracy was different. But there is not much difference, so I think there will be no problem to use whichever model to use (MLR or RF). For the performance of each models, even though my data set was not big, I was able to perform good models to predict what factors will affect to the diabetes diagnosis and how will affect to it. Because the plots I created, I was able to notice what variables was useful or not (Still need to use all variables since the corrplot showed values by each relation). 
+
+
+Also, the personal prediction part was having good result. Both models showed that second person will be diagnosed diabetes. One variable can change the outcome if the variable is affecting the result a lot. Espeically, the `glucose` that I picked for comparison was having distinguished outcome by the values. So, I might be able to use only glucose to know if one person has diabetes
+
+
+For more contents of this project, I want to focus more on the model building, since the accuracy was less than 0.8. Also, I want to show how other variables will affect the outcome in more details. 
